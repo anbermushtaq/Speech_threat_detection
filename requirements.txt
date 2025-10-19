@@ -1,0 +1,9 @@
+streamlit
+pandas
+altair
+pydub
+ffmpeg-python
+langdetect
+transformers
+torch
+openai-whisper
