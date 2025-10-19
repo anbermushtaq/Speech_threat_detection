@@ -1,4 +1,3 @@
-
 import os
 import time
 from datetime import datetime
@@ -7,6 +6,7 @@ import streamlit as st
 from pathlib import Path
 from typing import Dict, List, Tuple
 import langdetect
+
 # Optional ML imports
 try:
     from transformers import pipeline, Pipeline
@@ -25,7 +25,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
 
 # Styling header
 st.markdown("""
@@ -83,29 +82,10 @@ def get_asr_pipeline() -> Tuple[str, "Pipeline"]:
     """Load Hugging Face Whisper ASR model"""
     asr = pipeline("automatic-speech-recognition", model="openai/whisper-large-v2")
     return ("hf", asr)
-# def hf_transcribe_with_pipeline(asr_pipeline: Pipeline, path: Path) -> str:
-#     output = asr_pipeline(str(path))
-#     return output["text"].strip() if isinstance(output, dict) else str(output).strip()
-def get_classifier_pipeline(model_name: str):
-    """Load zero-shot or custom classifier"""
-    try:
-        if model_name == "custom_xlm_roberta":
-            classifier = pipeline(
-                "text-classification",
-                model="/content/drive/MyDrive/xlm_roberta_multilingual_classifier/final",
-                tokenizer="/content/drive/MyDrive/xlm_roberta_multilingual_classifier/final",
-                return_all_scores=True
-            )
-        else:
-            classifier = pipeline("zero-shot-classification", model=model_name)
-        return classifier
-    except Exception as e:
-        st.error(f"Model load failed: {e}")
-        st.stop()
 
 def hf_transcribe_with_pipeline(asr_pipeline_tuple, path: Path, lang_choice: str = "Auto") -> str:
     """Transcribe audio with Whisper and restrict to English/Urdu"""
-    asr_pipeline = asr_pipeline_tuple[1] # Extract the pipeline from the tuple
+    asr_pipeline = asr_pipeline_tuple[1]  # Extract the pipeline from the tuple
 
     lang_token = None
     if lang_choice == "English only":
@@ -129,31 +109,13 @@ def hf_transcribe_with_pipeline(asr_pipeline_tuple, path: Path, lang_choice: str
 
 def classify_text(text: str, classifier: Pipeline, labels: List[str]) -> Dict:
     try:
-        if "zero-shot" in classifier.task:
-            # For zero-shot models like RoBERTa or BART
-            result = classifier(text, labels, multi_label=False, hypothesis_template="This text is about {}.")
-            labels_out, scores_out = result["labels"], result["scores"]
-        else:
-            # For custom fine-tuned text classification models
-            outputs = classifier(text)
-            # Handle both single and batch outputs
-            if isinstance(outputs, list):
-                outputs = outputs[0]  # unwrap batch
-            if isinstance(outputs, list):
-                # Handle return_all_scores=True (list of dicts)
-                labels_out = [LABEL_MAP.get(o["label"], o["label"]) for o in outputs]
-                scores_out = [o["score"] for o in outputs]
-            else:
-                # Single dict output
-                labels_out = [LABEL_MAP.get(outputs["label"], outputs["label"])]
-                scores_out = [outputs["score"]]
-        # Pick the top scoring label
+        result = classifier(text, labels, multi_label=False, hypothesis_template="This text is about {}.")
+        labels_out, scores_out = result["labels"], result["scores"]
         top_label = labels_out[scores_out.index(max(scores_out))]
         return {"label": top_label, "scores": dict(zip(labels_out, scores_out))}
     except Exception as e:
         st.error(f"Classification failed: {e}")
         return {"label": "neutral", "scores": {}}
-
 
 def log_to_db(record: Dict):
     df = pd.read_csv(DB_CSV)
@@ -165,31 +127,25 @@ def log_to_db(record: Dict):
 # -----------------------------------------------------------
 st.sidebar.title("⚙️ Configuration")
 
-asr_pipeline_tuple = get_asr_pipeline() # Get the tuple
+asr_pipeline_tuple = get_asr_pipeline()
 
 asr_language = st.sidebar.selectbox(
     "Transcription Language Restriction",
     ["Auto", "English only", "Urdu only"],
     help="Restrict transcription to English or Urdu only"
 )
-if asr_pipeline_tuple[0] == "hf": # Check the method
+
+if asr_pipeline_tuple[0] == "hf":
     st.sidebar.markdown("**ASR Method:** `hf`")
 else:
     st.sidebar.markdown("**ASR Method:** `none` (Hugging Face models not available)")
 
-# Model selection mode
-model_type = st.sidebar.radio("Select Model Type", ["Zero-shot Models", "Custom Models"])
-
-if model_type == "Zero-shot Models":
-    model_choices = {
-        "✔Pretrained-RoBERTa": "roberta-large-mnli",
-        "✔Pretrained-MultiClassification": "facebook/bart-large-mnli",
-        "✔XLM-R": "joeddav/xlm-roberta-large-xnli"
-    }
-else:
-    model_choices = {
-        "✔IB: XLM-R-Fine-tuned": "/content/drive/MyDrive/xlm_roberta_multilingual_classifier/final"
-    }
+# Only zero-shot models remain
+model_choices = {
+    "✔Pretrained-RoBERTa": "roberta-large-mnli",
+    "✔Pretrained-MultiClassification": "facebook/bart-large-mnli",
+    "✔XLM-R": "joeddav/xlm-roberta-large-xnli"
+}
 
 model_display = st.sidebar.selectbox("Choose a Model", list(model_choices.keys()))
 model_path = model_choices[model_display]
@@ -203,10 +159,7 @@ with st.sidebar:
 # Load classifier
 with st.spinner("Loading model..."):
     try:
-        if model_type == "Custom Models":
-            classifier = pipeline("text-classification", model=model_path, tokenizer=model_path, return_all_scores=True)
-        else:
-            classifier = pipeline("zero-shot-classification", model=model_path)
+        classifier = pipeline("zero-shot-classification", model=model_path)
     except Exception as e:
         st.error(f"Model load failed: {e}")
         st.stop()
@@ -242,10 +195,7 @@ with tab1:
             wav_path = normalize_audio_to_wav(saved_path)
             st.info("Transcribing audio...")
             try:
-                if asr_pipeline_tuple[0] == "hf": # Check the method
-                    transcription_text = hf_transcribe_with_pipeline(asr_pipeline_tuple, wav_path) # Pass the tuple
-                else:
-                    st.warning("No ASR available.")
+                transcription_text = hf_transcribe_with_pipeline(asr_pipeline_tuple, wav_path, asr_language)
             except Exception as e:
                 st.error(f"Transcription failed: {e}")
     else:
